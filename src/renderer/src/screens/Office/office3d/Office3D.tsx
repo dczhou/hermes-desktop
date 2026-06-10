@@ -99,38 +99,38 @@ export default function Office3D({
     base: [number, number, number],
   ): [number, number, number] => devPos[id] ?? base;
 
-  const select = (meta: DevSel): void => {
-    const p = posOf(meta.id, meta.base);
-    setDevSel(meta);
-    const msg = `🏢 SELECTED ${meta.label} (${meta.id}) — current position [${p[0].toFixed(2)}, ${p[2].toFixed(2)}]. Now click empty ground to set its new spot.`;
-    console.log(msg);
-    onDevLog?.(msg);
-  };
-
-  // Landmark click handler (bank / showroom groups).
+  // Landmark click handler (bank / showroom groups). The select logic is
+  // inlined here (and in pickBackdrop) rather than shared, so that when the
+  // production build strips these dev-only handlers there is no lingering
+  // shared helper left referenced in the bundle.
   const pickLandmark =
     (meta: DevSel) =>
     (e: ThreeEvent<MouseEvent>): void => {
       if (!devMode) return;
       e.stopPropagation();
-      select(meta);
+      const p = posOf(meta.id, meta.base);
+      setDevSel(meta);
+      const msg = `🏢 SELECTED ${meta.label} (${meta.id}) — current position [${p[0].toFixed(2)}, ${p[2].toFixed(2)}]. Now click empty ground to set its new spot.`;
+      console.log(msg);
+      onDevLog?.(msg);
     };
 
   // Backdrop building click handler (passed down into CityBackdrop). Stable so
   // the memoized CityBackdrop doesn't re-render on unrelated parent updates.
   const pickBackdrop = useCallback(
     (b: { id: string; label: string; x: number; z: number }): void => {
-      select({
+      const meta: DevSel = {
         id: b.id,
         label: b.label,
         kind: "backdrop",
         base: [b.x, 0, b.z],
         hint: "BACKDROP_OVERRIDES in CityBackdrop.tsx",
-      });
+      };
+      setDevSel(meta);
+      const msg = `🏢 SELECTED ${meta.label} (${meta.id}) — current position [${b.x.toFixed(2)}, ${b.z.toFixed(2)}]. Now click empty ground to set its new spot.`;
+      console.log(msg);
+      onDevLog?.(msg);
     },
-    // `select` is recreated each render but only reads state setters + onDevLog;
-    // depend on onDevLog so the logged sink stays current.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
     [onDevLog],
   );
 
