@@ -48,13 +48,26 @@ function dashboardApiUrl(config: RemoteSessionConfig, path: string): string {
   return new URL(path, `${base}/`).toString();
 }
 
+/**
+ * Send the auth token as BOTH `Authorization: Bearer` (required by the
+ * Hermes API Server — see the API Server docs) and the legacy
+ * `X-Hermes-Session-Token` header (used by older dashboard endpoints).
+ * Sending both is harmless and keeps backward compatibility.
+ */
+function remoteAuthHeaders(token: string): Record<string, string> {
+  return {
+    Authorization: `Bearer ${token}`,
+    "X-Hermes-Session-Token": token,
+  };
+}
+
 export function remoteRequestJson<T>(
   config: RemoteSessionConfig,
   path: string,
   options: RemoteRequestOptions = {},
 ): Promise<T> {
   const token = config.apiKey.trim();
-  if (!token) throw new Error("Remote Hermes dashboard token is not configured.");
+  if (!token) throw new Error("Remote Hermes token is not configured.");
 
   return new Promise((resolve, reject) => {
     const parsed = new URL(dashboardApiUrl(config, path));
@@ -67,7 +80,7 @@ export function remoteRequestJson<T>(
         method: options.method ?? "GET",
         headers: {
           "Content-Type": "application/json",
-          "X-Hermes-Session-Token": token,
+          ...remoteAuthHeaders(token),
           ...(body ? { "Content-Length": Buffer.byteLength(body) } : {}),
         },
       },
@@ -237,26 +250,46 @@ function normalizeCachedSession(row: RemoteRecord): CachedSession {
   };
 }
 
+/**
+ * Extract the session array from a list response. Tries several common
+ * shapes: `{sessions:[...]}`, `{data:[...]}`, `{items:[...]}`, or a bare
+ * array — so we tolerate both the dashboard and API Server variants.
+ */
 function sessionsFromResponse(response: unknown): RemoteRecord[] {
   const record = asRecord(response);
-  return asArray(record.sessions);
+  // Prefer named keys, then fall back to a bare array.
+  for (const key of ["sessions", "data", "items", "results"] as const) {
+    if (Array.isArray(record[key])) return asArray(record[key]);
+  }
+  // Bare array response
+  return asArray(response);
 }
 
+/**
+ * Try the documented API Server endpoint first (`/api/sessions`), then
+ * fall back to the dashboard's profile-aware variant
+ * (`/api/profiles/sessions`) which older dashboard builds expose.
+ *
+ * Per the API Server docs the supported params are `limit`, `offset`,
+ * `source`, and `include_children`. We also pass `archived` and `order`
+ * which the dashboard accepts and the API Server ignores if unknown.
+ */
 async function remoteSessionListPage(
   config: RemoteSessionConfig,
   limit: number,
   offset: number,
 ): Promise<unknown> {
-  const profileEndpoint =
-    `/api/profiles/sessions?limit=${limit}&offset=${offset}` +
-    "&min_messages=0&archived=exclude&order=recent&profile=all";
+  const apiServerEndpoint =
+    `/api/sessions?limit=${limit}&offset=${offset}` +
+    "&archived=exclude&order=recent";
 
   try {
-    return await remoteRequestJson(config, profileEndpoint);
+    return await remoteRequestJson(config, apiServerEndpoint);
   } catch {
     return remoteRequestJson(
       config,
-      `/api/sessions?limit=${limit}&offset=${offset}&archived=exclude&order=recent`,
+      `/api/profiles/sessions?limit=${limit}&offset=${offset}` +
+        "&min_messages=0&archived=exclude&order=recent&profile=all",
     );
   }
 }
@@ -286,26 +319,36 @@ export async function remoteSearchSessions(
 ): Promise<SearchResult[]> {
   const trimmed = query.trim();
   if (!trimmed) return [];
-  const response = await remoteRequestJson(
-    config,
-    `/api/sessions/search?q=${encodeURIComponent(trimmed)}`,
-  );
-  const records = asArray(asRecord(response).results);
-  const results = records.slice(0, limit).map((row) => {
-    const sessionId = stringValue(row.session_id, stringValue(row.id));
-    return {
-      sessionId,
-      title: nullableString(row.title),
-      startedAt: numberValue(
-        row.session_started,
-        numberValue(row.started_at, numberValue(row.timestamp)),
-      ),
-      source: stringValue(row.source, "chat"),
-      messageCount: numberValue(row.message_count),
-      model: stringValue(row.model),
-      snippet: stringValue(row.snippet),
-    };
-  });
+
+  // The API Server does not expose a dedicated search endpoint, so this
+  // may 404. Wrap in try/catch and fall through to the message-scan
+  // fallback below.
+  let results: SearchResult[] = [];
+  try {
+    const response = await remoteRequestJson(
+      config,
+      `/api/sessions/search?q=${encodeURIComponent(trimmed)}`,
+    );
+    const records = asArray(asRecord(response).results);
+    results = records.slice(0, limit).map((row) => {
+      const sessionId = stringValue(row.session_id, stringValue(row.id));
+      return {
+        sessionId,
+        title: nullableString(row.title),
+        startedAt: numberValue(
+          row.session_started,
+          numberValue(row.started_at, numberValue(row.timestamp)),
+        ),
+        source: stringValue(row.source, "chat"),
+        messageCount: numberValue(row.message_count),
+        model: stringValue(row.model),
+        snippet: stringValue(row.snippet),
+      };
+    });
+  } catch {
+    // Endpoint not available (e.g. stock API Server) — use fallback below.
+    results = [];
+  }
 
   const enriched = await enrichRemoteSearchResults(config, results);
   if (enriched.length >= limit) return enriched.slice(0, limit);
@@ -459,7 +502,17 @@ export async function remoteGetSessionMessages(
     config,
     `/api/sessions/${encodeURIComponent(sessionId)}/messages`,
   );
-  const rows = asArray(asRecord(response).messages).map(normalizeMessageRow);
+  // Tolerate {messages:[...]}, {data:[...]}, or bare array
+  const record = asRecord(response);
+  let rawRows: RemoteRecord[];
+  if (Array.isArray(record.messages)) {
+    rawRows = asArray(record.messages);
+  } else if (Array.isArray(record.data)) {
+    rawRows = asArray(record.data);
+  } else {
+    rawRows = asArray(response);
+  }
+  const rows = rawRows.map(normalizeMessageRow);
   return hydrateRemotePromptImageAttachments(config, expandRowsToHistory(rows));
 }
 
