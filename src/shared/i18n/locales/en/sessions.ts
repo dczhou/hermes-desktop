@@ -34,4 +34,6 @@ export default {
   deleteSelectedConfirm:
     "Delete {{count}} selected sessions? This cannot be undone — messages and session records will be permanently removed.",
   deleteSelectedClose: "Close bulk delete confirmation",
+  // Remote mode
+  remoteModeBanner: "Connected to remote Hermes — sessions synced from server",
 } as const;

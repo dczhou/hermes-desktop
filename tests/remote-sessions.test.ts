@@ -90,49 +90,75 @@ describe("remote session REST bridge", () => {
           return;
         }
 
-        if (
-          req.url ===
-          "/api/profiles/sessions?limit=2&offset=3&min_messages=0&archived=exclude&order=recent&profile=all"
-        ) {
-          res.end(
-            JSON.stringify({
-              total: 1,
-              sessions: [
-                {
-                  id: "sess-list",
-                  source: "chat",
-                  started_at: 1700000000,
-                  ended_at: null,
-                  message_count: 4,
-                  model: "codex-cli/gpt-5.5",
-                  title: null,
-                  preview: "Remote preview",
-                },
-              ],
-            }),
-          );
-          return;
-        }
+        // Session list endpoints — handle both /api/sessions (API Server)
+        // and /api/profiles/sessions (dashboard) since the code tries the
+        // former first and falls back to the latter.
+        const sessionListUrl = new URL(req.url || "", "http://127.0.0.1");
+        const isSessionList =
+          (sessionListUrl.pathname === "/api/sessions" ||
+            sessionListUrl.pathname === "/api/profiles/sessions") &&
+          sessionListUrl.searchParams.get("limit");
+        if (isSessionList) {
+          const limit = Number(sessionListUrl.searchParams.get("limit"));
+          const offset = Number(sessionListUrl.searchParams.get("offset"));
 
-        if (
-          req.url ===
-          "/api/profiles/sessions?limit=50&offset=0&min_messages=0&archived=exclude&order=recent&profile=all"
-        ) {
-          res.end(
-            JSON.stringify({
-              sessions: [
-                {
-                  id: "sess-cache",
-                  source: "chat",
-                  started_at: 1700000002,
-                  message_count: 2,
-                  model: "custom/deepseek-v4-pro",
-                  preview: "Cached remote preview",
-                },
-              ],
-            }),
-          );
-          return;
+          if (limit === 2 && offset === 3) {
+            res.end(
+              JSON.stringify({
+                total: 1,
+                sessions: [
+                  {
+                    id: "sess-list",
+                    source: "chat",
+                    started_at: 1700000000,
+                    ended_at: null,
+                    message_count: 4,
+                    model: "codex-cli/gpt-5.5",
+                    title: null,
+                    preview: "Remote preview",
+                  },
+                ],
+              }),
+            );
+            return;
+          }
+
+          if (limit === 50 && offset === 0) {
+            res.end(
+              JSON.stringify({
+                sessions: [
+                  {
+                    id: "sess-cache",
+                    source: "chat",
+                    started_at: 1700000002,
+                    message_count: 2,
+                    model: "custom/deepseek-v4-pro",
+                    preview: "Cached remote preview",
+                  },
+                ],
+              }),
+            );
+            return;
+          }
+
+          if (limit === 75 && offset === 0) {
+            res.end(
+              JSON.stringify({
+                sessions: [
+                  {
+                    id: "sess-rich",
+                    source: "chat",
+                    started_at: 1700000005,
+                    message_count: 3,
+                    model: "deepseek/deepseek-v4-pro",
+                    title: "Rich fallback session",
+                    preview: "make an image",
+                  },
+                ],
+              }),
+            );
+            return;
+          }
         }
 
         if (req.url === "/api/sessions/sess-rich/messages") {
@@ -172,28 +198,6 @@ describe("remote session REST bridge", () => {
                   timestamp: 12,
                   tool_call_id: "call-1",
                   tool_name: "skill_view",
-                },
-              ],
-            }),
-          );
-          return;
-        }
-
-        if (
-          req.url ===
-          "/api/profiles/sessions?limit=75&offset=0&min_messages=0&archived=exclude&order=recent&profile=all"
-        ) {
-          res.end(
-            JSON.stringify({
-              sessions: [
-                {
-                  id: "sess-rich",
-                  source: "chat",
-                  started_at: 1700000005,
-                  message_count: 3,
-                  model: "deepseek/deepseek-v4-pro",
-                  title: "Rich fallback session",
-                  preview: "make an image",
                 },
               ],
             }),
@@ -289,9 +293,10 @@ describe("remote session REST bridge", () => {
   it("normalizes remote session list rows", async () => {
     const sessions = await remoteListSessions(config(), 2, 3);
 
+    // Code tries /api/sessions first (API Server endpoint)
     expect(requests[0]).toMatchObject({
       method: "GET",
-      url: "/api/profiles/sessions?limit=2&offset=3&min_messages=0&archived=exclude&order=recent&profile=all",
+      url: "/api/sessions?limit=2&offset=3&archived=exclude&order=recent",
       token: "test-token",
     });
     expect(sessions).toEqual([
@@ -308,7 +313,7 @@ describe("remote session REST bridge", () => {
     ]);
   });
 
-  it("falls back to the legacy session list endpoint for older dashboards", async () => {
+  it("falls back to the dashboard profiles endpoint when /api/sessions fails", async () => {
     const originalHandler = server.listeners("request")[0];
     server.removeListener("request", originalHandler);
     server.on("request", (req, res) => {
@@ -320,15 +325,14 @@ describe("remote session REST bridge", () => {
       });
 
       res.setHeader("Content-Type", "application/json");
-      if (req.url?.startsWith("/api/profiles/sessions")) {
+      // /api/sessions returns 404 — simulates a dashboard without API Server
+      if (req.url?.startsWith("/api/sessions?")) {
         res.statusCode = 404;
         res.end(JSON.stringify({ detail: "not found" }));
         return;
       }
-      if (
-        req.url ===
-        "/api/sessions?limit=1&offset=0&archived=exclude&order=recent"
-      ) {
+      // /api/profiles/sessions (dashboard fallback) succeeds
+      if (req.url?.startsWith("/api/profiles/sessions")) {
         res.end(
           JSON.stringify({
             sessions: [
@@ -349,8 +353,8 @@ describe("remote session REST bridge", () => {
     const sessions = await remoteListSessions(config(), 1, 0);
 
     expect(requests.map((request) => request.url)).toEqual([
-      "/api/profiles/sessions?limit=1&offset=0&min_messages=0&archived=exclude&order=recent&profile=all",
       "/api/sessions?limit=1&offset=0&archived=exclude&order=recent",
+      "/api/profiles/sessions?limit=1&offset=0&min_messages=0&archived=exclude&order=recent&profile=all",
     ]);
     expect(sessions[0]).toMatchObject({ id: "legacy-sess", messageCount: 1 });
   });
@@ -477,7 +481,7 @@ describe("remote session REST bridge", () => {
 
     expect(requests.map((request) => request.url)).toEqual([
       "/api/sessions/search?q=Thinking%20aloud",
-      "/api/profiles/sessions?limit=75&offset=0&min_messages=0&archived=exclude&order=recent&profile=all",
+      "/api/sessions?limit=75&offset=0&archived=exclude&order=recent",
       "/api/sessions/sess-rich/messages",
     ]);
     expect(results).toEqual([

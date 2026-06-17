@@ -35,19 +35,22 @@ function installHermesAPI(initialSessions: unknown[] = []): {
 } {
   let connectionConfigChanged: (() => void) | null = null;
   const api = {
+    isRemoteOnlyMode: vi.fn().mockResolvedValue(false),
     listCachedSessions: vi.fn().mockResolvedValue(initialSessions),
     syncSessionCache: vi.fn().mockResolvedValue(initialSessions),
     searchSessions: vi.fn().mockResolvedValue([]),
     deleteSession: vi.fn().mockResolvedValue(undefined),
     deleteSessions: vi.fn().mockResolvedValue({ requested: 0, deleted: 0 }),
-    onConnectionConfigChanged: vi.fn((callback: () => void) => {
-      connectionConfigChanged = callback;
-      return () => {
-        if (connectionConfigChanged === callback) {
-          connectionConfigChanged = null;
-        }
-      };
-    }),
+    onConnectionConfigChanged: vi.fn(
+      (callback: (config: { mode: string }) => void) => {
+        connectionConfigChanged = () => callback({ mode: "local" });
+        return () => {
+          if (connectionConfigChanged) {
+            connectionConfigChanged = null;
+          }
+        };
+      },
+    ),
   };
   Object.defineProperty(window, "hermesAPI", {
     configurable: true,

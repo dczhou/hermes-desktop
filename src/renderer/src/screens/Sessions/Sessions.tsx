@@ -1,5 +1,5 @@
 import { useEffect, useState, useRef, useCallback, useMemo, memo } from "react";
-import { Plus, Search, X, ChatBubble, Trash, Pencil } from "../../assets/icons";
+import { Plus, Search, X, ChatBubble, Trash, Pencil, Signal, AlertCircle } from "../../assets/icons";
 import { useI18n } from "../../components/useI18n";
 
 interface CachedSession {
@@ -319,6 +319,30 @@ function Sessions({
   const searchRef = useRef<HTMLInputElement>(null);
   const renameInputRef = useRef<HTMLInputElement>(null);
 
+  // Remote mode awareness — used for error context and subtle UI indicator
+  const [isRemoteMode, setIsRemoteMode] = useState(false);
+  const [lastError, setLastError] = useState<string | null>(null);
+
+  // Detect connection mode on mount and when connection config changes
+  useEffect(() => {
+    let cancelled = false;
+    window.hermesAPI
+      .isRemoteOnlyMode()
+      .then((remote) => {
+        if (!cancelled) setIsRemoteMode(remote);
+      })
+      .catch(() => {
+        /* ignore */
+      });
+    const cleanup = window.hermesAPI.onConnectionConfigChanged((config) => {
+      if (!cancelled) setIsRemoteMode(config.mode === "remote");
+    });
+    return () => {
+      cancelled = true;
+      cleanup();
+    };
+  }, []);
+
   // Rename state
   const [editingSessionId, setEditingSessionId] = useState<string | null>(null);
   const [editingTitle, setEditingTitle] = useState("");
@@ -331,32 +355,47 @@ function Sessions({
   // loading state, so it can run on a timer or on focus with no spinner flash.
   const refreshSessions = useCallback(async (): Promise<void> => {
     const requestId = ++loadRequestId.current;
-    const synced = await window.hermesAPI.syncSessionCache();
-    if (loadRequestId.current !== requestId) return;
-    setSessions((prev) => {
-      if (synced.length === 0 && prev.length > 0) {
-        return prev;
-      }
-      return synced.slice(0, 50);
-    });
+    try {
+      const synced = await window.hermesAPI.syncSessionCache();
+      if (loadRequestId.current !== requestId) return;
+      setSessions((prev) => {
+        if (synced.length === 0 && prev.length > 0) {
+          return prev;
+        }
+        return synced.slice(0, 50);
+      });
+      setLastError(null);
+    } catch (error) {
+      if (loadRequestId.current !== requestId) return;
+      const msg = error instanceof Error ? error.message : String(error);
+      setLastError(msg);
+      console.error("Failed to refresh sessions", error);
+    }
   }, []);
 
   const loadSessions = useCallback(async (): Promise<void> => {
     const requestId = ++loadRequestId.current;
     setLoading(true);
+    setLastError(null);
     try {
       const synced = await window.hermesAPI.syncSessionCache();
       if (loadRequestId.current !== requestId) return;
       setSessions(synced.slice(0, 50));
+      setLastError(null);
     } catch (error) {
       console.error("Failed to load sessions", error);
       try {
         const cached = await window.hermesAPI.listCachedSessions(50);
         if (loadRequestId.current === requestId) {
           setSessions(cached);
+          setLastError(null);
         }
       } catch (cacheError) {
-        console.error("Failed to load cached sessions", cacheError);
+        if (loadRequestId.current === requestId) {
+          const msg = cacheError instanceof Error ? cacheError.message : String(cacheError);
+          setLastError(msg);
+          console.error("Failed to load cached sessions", cacheError);
+        }
       }
     } finally {
       if (loadRequestId.current === requestId) {
@@ -417,8 +456,11 @@ function Sessions({
       });
       try {
         await window.hermesAPI.updateSessionTitle(sessionId, trimmed);
+        setLastError(null);
       } catch (err) {
         console.error("Failed to rename session", sessionId, err);
+        const msg = err instanceof Error ? err.message : String(err);
+        setLastError(msg);
         // Rollback optimistic update
         setSessions((prev) =>
           prev.map((s) =>
@@ -460,8 +502,11 @@ function Sessions({
       setSearchResults((prev) => prev.filter((r) => r.sessionId !== sessionId));
       try {
         await window.hermesAPI.deleteSession(sessionId);
+        setLastError(null);
       } catch (err) {
         console.error("Failed to delete session", sessionId, err);
+        const msg = err instanceof Error ? err.message : String(err);
+        setLastError(msg);
       } finally {
         await refreshSessions();
         setDeletingSessionId(null);
@@ -513,8 +558,11 @@ function Sessions({
       setSearchResults((prev) => prev.filter((r) => !idSet.has(r.sessionId)));
       try {
         await window.hermesAPI.deleteSessions(ids);
+        setLastError(null);
       } catch (err) {
         console.error("Failed to delete selected sessions", ids, err);
+        const msg = err instanceof Error ? err.message : String(err);
+        setLastError(msg);
       } finally {
         await refreshSessions();
         setDeletingBulk(false);
@@ -610,6 +658,12 @@ function Sessions({
         const results = await window.hermesAPI.searchSessions(query);
         if (searchRequestId.current !== requestId) return;
         setSearchResults(results);
+        setLastError(null);
+      } catch (err) {
+        if (searchRequestId.current !== requestId) return;
+        const msg = err instanceof Error ? err.message : String(err);
+        setLastError(msg);
+        console.error("Search sessions failed", err);
       } finally {
         if (searchRequestId.current === requestId) {
           setIsSearching(false);
@@ -726,6 +780,29 @@ function Sessions({
               disabled={selectedCount === 0}
             >
               {t("sessions.deleteSelected")}
+            </button>
+          </div>
+        )}
+        {/* Remote mode indicator & error banner */}
+        {isRemoteMode && (
+          <div className="sessions-remote-banner">
+            <Signal size={14} className="sessions-remote-icon" />
+            <span className="sessions-remote-text">
+              {t("sessions.remoteModeBanner")}
+            </span>
+          </div>
+        )}
+        {lastError && (
+          <div className="sessions-error-banner">
+            <AlertCircle size={14} className="sessions-error-icon" />
+            <span className="sessions-error-text">{lastError}</span>
+            <button
+              type="button"
+              className="btn-ghost sessions-error-dismiss"
+              onClick={() => setLastError(null)}
+              aria-label={t("common.dismiss")}
+            >
+              <X size={12} />
             </button>
           </div>
         )}
