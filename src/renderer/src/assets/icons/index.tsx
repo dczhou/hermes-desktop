@@ -52,3 +52,4 @@ export { Filter as TriageIcon } from "lucide-react";
 export { Shield as ApprovalIcon } from "lucide-react";
 export { Folder as CuratorIcon } from "lucide-react";
 export { User as ProfileIcon } from "lucide-react";
+export { AlertCircle } from "lucide-react";
