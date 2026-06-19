@@ -46,6 +46,8 @@ export interface ConnectionConfig {
   mode: "local" | "remote" | "ssh";
   remoteUrl: string;
   apiKey: string;
+  username?: string; // New field for basic auth username
+  password?: string; // New field for basic auth password
   remoteChatTransport: RemoteChatTransport;
   sshChatTransport: RemoteChatTransport;
   ssh: SshConnectionConfig;
@@ -57,6 +59,8 @@ export interface PublicConnectionConfig {
   remoteChatTransport: RemoteChatTransport;
   sshChatTransport: RemoteChatTransport;
   hasApiKey: boolean;
+  hasUsername: boolean; // New field for basic auth username presence
+  hasPassword: boolean; // New field for basic auth password presence
   // Length of the stored API key, exposed so the renderer can show a
   // mask that matches the real value's width. The secret itself never
   // leaves the main process. 0 when no key is set.
@@ -100,6 +104,8 @@ export function getConnectionConfig(): ConnectionConfig {
     mode: (data.connectionMode as "local" | "remote" | "ssh") || "local",
     remoteUrl: (data.remoteUrl as string) || "",
     apiKey: (data.remoteApiKey as string) || "",
+    username: (data.remoteUsername as string) || "",
+    password: (data.remotePassword as string) || "",
     remoteChatTransport: normalizeRemoteChatTransport(
       data.remoteChatTransport,
     ),
@@ -123,6 +129,8 @@ export function getPublicConnectionConfig(): PublicConnectionConfig {
     remoteChatTransport: config.remoteChatTransport,
     sshChatTransport: config.sshChatTransport,
     hasApiKey: config.apiKey.length > 0,
+    hasUsername: (config.username?.length ?? 0) > 0,
+    hasPassword: (config.password?.length ?? 0) > 0,
     apiKeyLength: config.apiKey.length,
     ssh: config.ssh,
   };
@@ -143,8 +151,14 @@ export function setConnectionConfig(config: ConnectionConfig): void {
   data.sshChatTransport = normalizeRemoteChatTransport(
     config.sshChatTransport,
   );
+  if (config.mode === "remote" || config.username?.trim()) {
+    data.remoteUsername = config.username ?? "";
+  }
+  if (config.mode === "remote" || config.password?.trim()) {
+    data.remotePassword = config.password ?? "";
+  }
   if (config.mode === "ssh") {
-    data.sshConfig = config.ssh;
+  data.sshConfig = config.ssh;
   }
   writeDesktopConfig(data);
 }

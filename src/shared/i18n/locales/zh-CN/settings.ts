@@ -102,6 +102,12 @@ export default {
   remoteApiKey: "API 密钥",
   remoteApiKeyHint:
     "与远程主机上的 API_SERVER_KEY 匹配。如果服务器接受未认证的请求，可以留空。",
+  remoteUsername: "用户名",
+  remoteUsernamePlaceholder: "admin",
+  remoteUsernameHint: "远程 Hermes Dashboard 的 Basic Auth 用户名（如果需要）。",
+  remotePassword: "密码",
+  remotePasswordPlaceholder: "输入密码",
+  remotePasswordHint: "远程 Hermes Dashboard 的 Basic Auth 密码（如果需要）。",
   testingConnection: "测试中...",
   testConnection: "测试连接",
   save: "保存",

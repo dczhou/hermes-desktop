@@ -162,6 +162,8 @@ function Settings({ profile }: { profile?: string }): React.JSX.Element {
   const [connRemoteUrl, setConnRemoteUrl] = useState("");
   const [connApiKey, setConnApiKey] = useState("");
   const [connApiKeyMask, setConnApiKeyMask] = useState("");
+  const [connUsername, setConnUsername] = useState("");
+  const [connPassword, setConnPassword] = useState("");
   const [connHasApiKey, setConnHasApiKey] = useState(false);
   const [remoteChatTransport, setRemoteChatTransport] =
     useState<RemoteChatTransport>("auto");
@@ -233,6 +235,8 @@ function Settings({ profile }: { profile?: string }): React.JSX.Element {
     setConnMode(conn.mode);
     setConnRemoteUrl(conn.remoteUrl);
     setConnHasApiKey(conn.hasApiKey);
+    setConnUsername(conn.username || "");
+    setConnPassword(conn.password || "");
     setRemoteChatTransport(conn.remoteChatTransport ?? "auto");
     setSshChatTransport(conn.sshChatTransport ?? "auto");
     const mask = conn.hasApiKey ? makeApiKeyMask(conn.apiKeyLength) : "";
@@ -464,6 +468,8 @@ function Settings({ profile }: { profile?: string }): React.JSX.Element {
         connMode,
         connRemoteUrl,
         apiKey,
+        connUsername,
+        connPassword,
       );
       if (apiKey !== undefined) {
         const hasApiKey = apiKey.length > 0;
@@ -560,6 +566,8 @@ function Settings({ profile }: { profile?: string }): React.JSX.Element {
       "remote",
       connRemoteUrl.trim(),
       apiKey,
+      connUsername,
+      connPassword,
     );
     await window.hermesAPI.setConnectionChatTransports(
       remoteChatTransport,
@@ -970,6 +978,44 @@ function Settings({ profile }: { profile?: string }): React.JSX.Element {
               />
               <div className="settings-field-hint">
                 {t("settings.remoteApiKeyHint")}
+              </div>
+            </div>
+            <div className="settings-field">
+              <label className="settings-field-label">
+                {t("settings.remoteUsername")}
+              </label>
+              <input
+                className="input"
+                type="text"
+                value={connUsername}
+                onChange={(e) => setConnUsername(e.target.value)}
+                placeholder={t("settings.remoteUsernamePlaceholder")}
+                onBlur={handleSaveConnection}
+              />
+              <div className="settings-field-hint">
+                {t("settings.remoteUsernameHint")}
+              </div>
+            </div>
+            <div className="settings-field">
+              <label className="settings-field-label">
+                {t("settings.remotePassword")}
+              </label>
+              <input
+                className="input"
+                type="password"
+                value={connPassword}
+                onChange={(e) => setConnPassword(e.target.value)}
+                onFocus={(e) => {
+                  if (connPassword === "") {
+                    // Only select if it's empty (not masked)
+                    e.currentTarget.select();
+                  }
+                }}
+                placeholder={t("settings.remotePasswordPlaceholder")}
+                onBlur={handleSaveConnection}
+              />
+              <div className="settings-field-hint">
+                {t("settings.remotePasswordHint")}
               </div>
             </div>
             <div className="settings-field">

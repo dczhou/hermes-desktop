@@ -119,6 +119,12 @@ export default {
   remoteApiKey: "API Key",
   remoteApiKeyHint:
     "Matches API_SERVER_KEY on the remote host. Leave empty if the server accepts unauthenticated requests.",
+  remoteUsername: "Username",
+  remoteUsernamePlaceholder: "admin",
+  remoteUsernameHint: "Basic Auth username for the remote Hermes Dashboard (if required).",
+  remotePassword: "Password",
+  remotePasswordPlaceholder: "Enter password",
+  remotePasswordHint: "Basic Auth password for the remote Hermes Dashboard (if required).",
   testingConnection: "Testing...",
   testConnection: "Test Connection",
   save: "Save",
