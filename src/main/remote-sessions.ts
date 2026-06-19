@@ -18,6 +18,98 @@ import { isImageMime, MAX_IMAGE_BYTES } from "../shared/attachments";
 export interface RemoteSessionConfig {
   remoteUrl: string;
   apiKey: string;
+  /** Basic Auth username (if configured on remote Dashboard) */
+  username?: string;
+  /** Basic Auth password (if configured on remote Dashboard) */
+  password?: string;
+}
+
+/** Cache for session cookies obtained via Basic Auth login */
+const sessionCookieCache = new Map<
+  string,
+  { cookies: string; expiresAt: number }
+>();
+
+/**
+ * Login via Basic Auth and get session cookies.
+ * The remote Dashboard REST API requires session cookies (not Bearer Token).
+ */
+async function loginWithBasicAuthAndGetCookies(
+  config: RemoteSessionConfig,
+): Promise<string> {
+  const cacheKey = `${config.remoteUrl}:${config.username}`;
+  const cached = sessionCookieCache.get(cacheKey);
+
+  // Return cached cookies if still valid (with 5 minute buffer)
+  if (cached && cached.expiresAt > Date.now() + 5 * 60 * 1000) {
+    return cached.cookies;
+  }
+
+  return new Promise((resolve, reject) => {
+    const parsed = new URL(dashboardApiUrl(config, "/auth/password-login"));
+    const client = parsed.protocol === "https:" ? https : http;
+    const body = JSON.stringify({
+      provider: "basic",
+      username: config.username,
+      password: config.password,
+    });
+
+    const req = client.request(
+      parsed,
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          ...(config.username && config.password
+            ? {
+                Authorization: `Basic ${Buffer.from(
+                  `${config.username}:${config.password}`,
+                ).toString("base64")}`,
+              }
+            : {}),
+        },
+      },
+      (res) => {
+        const chunks: Buffer[] = [];
+        res.on("error", reject);
+        res.on("data", (chunk: Buffer) => chunks.push(chunk));
+        res.on("end", () => {
+          const text = Buffer.concat(chunks).toString("utf8");
+          if ((res.statusCode ?? 500) >= 400) {
+            reject(new Error(`Login failed: ${res.statusCode} ${text}`));
+            return;
+          }
+          // Extract session cookies from Set-Cookie headers
+          const setCookieHeaders = res.headers["set-cookie"];
+          if (!setCookieHeaders) {
+            reject(new Error("No session cookies received from login"));
+            return;
+          }
+          // Parse cookies (format: "name=value; Path=/; ...")
+          const cookies = setCookieHeaders
+            .map((c) => {
+              const parts = c.split(";");
+              return parts[0]; // First part is "name=value"
+            })
+            .join("; ");
+
+          // Cache cookies (default 24 hour expiry)
+          sessionCookieCache.set(cacheKey, {
+            cookies,
+            expiresAt: Date.now() + 24 * 60 * 60 * 1000,
+          });
+
+          resolve(cookies);
+        });
+      },
+    );
+    req.on("error", reject);
+    req.setTimeout(15000, () => {
+      req.destroy(new Error("Login timeout"));
+    });
+    req.write(body);
+    req.end();
+  });
 }
 
 type HttpMethod = "GET" | "POST" | "PATCH" | "DELETE";
@@ -61,15 +153,39 @@ function remoteAuthHeaders(token: string): Record<string, string> {
   };
 }
 
-export function remoteRequestJson<T>(
+/**
+ * Make an authenticated request to the remote Dashboard REST API.
+ * If username/password are provided, uses session cookie auth (required by Dashboard).
+ * Otherwise falls back to Bearer Token auth.
+ */
+export async function remoteRequestJson<T>(
   config: RemoteSessionConfig,
   path: string,
   options: RemoteRequestOptions = {},
 ): Promise<T> {
   const token = config.apiKey.trim();
-  if (!token) throw new Error("Remote Hermes token is not configured.");
+  if (!token && !config.username) {
+    throw new Error("Remote Hermes token or credentials are not configured.");
+  }
 
-  return new Promise((resolve, reject) => {
+  // Build auth headers
+  let headers: Record<string, string> = {
+    "Content-Type": "application/json",
+  };
+
+  if (config.username && config.password) {
+    // Use session cookie authentication (required by Dashboard REST API)
+    const cookies = await loginWithBasicAuthAndGetCookies(config);
+    headers["Cookie"] = cookies;
+  } else if (token) {
+    // Fall back to Bearer Token (legacy)
+    headers = {
+      ...headers,
+      ...remoteAuthHeaders(token),
+    };
+  }
+
+  return new Promise<T>((resolve, reject) => {
     const parsed = new URL(dashboardApiUrl(config, path));
     const client = parsed.protocol === "https:" ? https : http;
     const body =
@@ -79,8 +195,7 @@ export function remoteRequestJson<T>(
       {
         method: options.method ?? "GET",
         headers: {
-          "Content-Type": "application/json",
-          ...remoteAuthHeaders(token),
+          ...headers,
           ...(body ? { "Content-Length": Buffer.byteLength(body) } : {}),
         },
       },
@@ -88,9 +203,26 @@ export function remoteRequestJson<T>(
         const chunks: Buffer[] = [];
         res.on("error", reject);
         res.on("data", (chunk: Buffer) => chunks.push(chunk));
-        res.on("end", () => {
+        res.on("end", async () => {
           const text = Buffer.concat(chunks).toString("utf8");
           if ((res.statusCode ?? 500) >= 400) {
+            // If we got a cookie error, try re-logging in once
+            if (
+              text.includes('"reason":"no_cookie"') &&
+              config.username &&
+              config.password
+            ) {
+              const cacheKey = `${config.remoteUrl}:${config.username}`;
+              sessionCookieCache.delete(cacheKey);
+              // Retry without the cache
+              try {
+                const result = await remoteRequestJson<T>(config, path, options);
+                resolve(result);
+              } catch (err) {
+                reject(err);
+              }
+              return;
+            }
             reject(new Error(`${res.statusCode}: ${text || res.statusMessage}`));
             return;
           }
