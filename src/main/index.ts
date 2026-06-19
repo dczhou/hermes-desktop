@@ -1120,12 +1120,16 @@ function setupIPC(): void {
       mode: "local" | "remote" | "ssh",
       remoteUrl: string,
       apiKey?: string,
+      username?: string,
+      password?: string,
     ) => {
       const existing = getConnectionConfig();
       setConnectionConfig({
         ...existing,
         mode,
         remoteUrl,
+        username: username ?? existing.username,
+        password: password ?? existing.password,
         apiKey: resolveConnectionApiKeyUpdate(
           existing,
           mode,

@@ -155,8 +155,16 @@ export function getRemoteAuthHeader(): Record<string, string> {
       return { Authorization: `Bearer ${_sshRemoteApiKey}` };
     return {};
   }
-  if (conn.mode === "remote" && conn.apiKey) {
-    return { Authorization: `Bearer ${conn.apiKey}` };
+  if (conn.mode === "remote") {
+    // 优先使用 Basic Auth（如果提供了用户名和密码）
+    if (conn.username && conn.password) {
+      const token = btoa(`${conn.username}:${conn.password}`);
+      return { Authorization: `Basic ${token}` };
+    }
+    // 否则回退到 Bearer Token（如果提供了 API 密钥）
+    if (conn.apiKey) {
+      return { Authorization: `Bearer ${conn.apiKey}` };
+    }
   }
   return {};
 }

@@ -303,6 +303,8 @@ interface HermesAPI {
     sshChatTransport: "auto" | "dashboard" | "legacy";
     hasApiKey: boolean;
     apiKeyLength: number;
+    username?: string;
+    password?: string;
     ssh: {
       host: string;
       port: number;
@@ -316,6 +318,8 @@ interface HermesAPI {
     mode: "local" | "remote" | "ssh",
     remoteUrl: string,
     apiKey?: string,
+    username?: string,
+    password?: string,
   ) => Promise<boolean>;
   setConnectionChatTransports: (
     remoteChatTransport: "auto" | "dashboard" | "legacy",
@@ -329,6 +333,8 @@ interface HermesAPI {
       sshChatTransport: "auto" | "dashboard" | "legacy";
       hasApiKey: boolean;
       apiKeyLength: number;
+      username?: string;
+      password?: string;
       ssh: {
         host: string;
         port: number;
