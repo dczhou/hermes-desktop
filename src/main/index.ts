@@ -1110,7 +1110,7 @@ function setupIPC(): void {
   // Connection mode (local / remote / ssh)
   ipcMain.handle("is-remote-mode", () => isRemoteMode());
   ipcMain.handle("is-remote-only-mode", () => isRemoteOnlyMode());
-  ipcMain.handle("get-connection-config", () => getPublicConnectionConfig());
+  ipcMain.handle("get-connection-config", () => getConnectionConfig());
   ipcMain.handle("is-ssh-tunnel-active", () => isSshTunnelActive());
 
   ipcMain.handle(
