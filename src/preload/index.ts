@@ -331,8 +331,13 @@ const hermesAPI = {
       localPort,
     ),
 
-  testRemoteConnection: (url: string, apiKey?: string): Promise<boolean> =>
-    ipcRenderer.invoke("test-remote-connection", url, apiKey),
+  testRemoteConnection: (
+    url: string,
+    apiKey?: string,
+    username?: string,
+    password?: string,
+  ): Promise<boolean> =>
+    ipcRenderer.invoke("test-remote-connection", url, apiKey, username, password),
 
   testSshConnection: (
     host: string,
