@@ -583,7 +583,7 @@ async function getRemoteDashboardStatusForConfig(
       2_000,
       connection.cookies,
     );
-    if (dashboardStatusRequiresOAuth(status)) {
+    if (dashboardStatusRequiresOAuth(status) && connection.authMode !== "basic-auth") {
       return {
         supported: true,
         running: false,
