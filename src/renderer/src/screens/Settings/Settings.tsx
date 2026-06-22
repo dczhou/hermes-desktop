@@ -953,7 +953,6 @@ function Settings({ profile }: { profile?: string }): React.JSX.Element {
                 value={connRemoteUrl}
                 onChange={(e) => setConnRemoteUrl(e.target.value)}
                 placeholder="http://192.168.1.100:8642"
-                onBlur={handleSaveConnection}
               />
               <div className="settings-field-hint">
                 {t("settings.remoteUrlHint")}
@@ -974,7 +973,6 @@ function Settings({ profile }: { profile?: string }): React.JSX.Element {
                   }
                 }}
                 placeholder={t("settings.remoteApiKey")}
-                onBlur={handleSaveConnection}
               />
               <div className="settings-field-hint">
                 {t("settings.remoteApiKeyHint")}
@@ -990,7 +988,6 @@ function Settings({ profile }: { profile?: string }): React.JSX.Element {
                 value={connUsername}
                 onChange={(e) => setConnUsername(e.target.value)}
                 placeholder={t("settings.remoteUsernamePlaceholder")}
-                onBlur={handleSaveConnection}
               />
               <div className="settings-field-hint">
                 {t("settings.remoteUsernameHint")}
@@ -1012,7 +1009,6 @@ function Settings({ profile }: { profile?: string }): React.JSX.Element {
                   }
                 }}
                 placeholder={t("settings.remotePasswordPlaceholder")}
-                onBlur={handleSaveConnection}
               />
               <div className="settings-field-hint">
                 {t("settings.remotePasswordHint")}
