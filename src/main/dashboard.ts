@@ -42,6 +42,12 @@ export interface DashboardConnection {
   port?: number;
   logPath?: string;
   alreadyRunning?: boolean;
+  /** When "basic-auth", requests must carry the session Cookie header
+   *  instead of the X-Hermes-Session-Token. */
+  authMode?: "token" | "basic-auth";
+  /** Session cookies (hermes_session_at=...; hermes_session_rt=...) used
+   *  for both REST and ws-ticket requests under basic-auth mode. */
+  cookies?: string;
 }
 
 export interface DashboardStatus {
@@ -97,15 +103,209 @@ export function remoteDashboardConnectionFromConfig(
 ): DashboardConnection | null {
   if (config.mode !== "remote") return null;
   const baseUrl = normalizeRemoteDashboardBaseUrl(config.remoteUrl);
+  if (!baseUrl) return null;
+
+  // ── Basic Auth path ──────────────────────────────────────
+  // When username/password are configured the remote Dashboard uses
+  // cookie-based session auth. The connection's token is unused for
+  // REST requests (we send Cookie instead) but we still need a
+  // non-empty value so callers that check `connection.token` don't
+  // bail out. The real wsUrl is built lazily after obtaining a
+  // ws-ticket (see ensureBasicAuthWsTicket).
+  if (config.username && config.password) {
+    return {
+      baseUrl,
+      wsUrl: dashboardWsUrl(baseUrl, "basic-auth"), // placeholder, replaced before connect
+      token: "basic-auth",
+      mode: "remote",
+      profile: resolveProfile(profile),
+      authMode: "basic-auth",
+    };
+  }
+
+  // ── Token path (legacy / API_SERVER_KEY) ─────────────────
   const token = config.apiKey.trim();
-  if (!baseUrl || !token) return null;
+  if (!token) return null;
   return {
     baseUrl,
     wsUrl: dashboardWsUrl(baseUrl, token),
     token,
     mode: "remote",
     profile: resolveProfile(profile),
+    authMode: "token",
   };
+}
+
+// ── Basic Auth helpers (cookie-based Dashboard auth) ──────
+// When the remote Dashboard is configured with basic_auth
+// (username/password), it rejects Bearer/X-Hermes-Session-Token
+// auth and requires:
+//   1. POST /auth/password-login → session cookies
+//   2. REST requests carry Cookie: hermes_session_at=...
+//   3. WebSocket: POST /api/auth/ws-ticket (with cookie) → one-time
+//      ticket, then WS URL uses ?ticket=<ticket> instead of ?token=
+
+interface BasicAuthCacheEntry {
+  cookies: string;
+  expiresAt: number;
+}
+const basicAuthCookieCache = new Map<string, BasicAuthCacheEntry>();
+const BASIC_AUTH_COOKIE_TTL = 11 * 60 * 60 * 1000; // 11h (cookie max-age is 12h)
+
+function basicAuthCacheKey(baseUrl: string, username: string): string {
+  return `${baseUrl}|${username}`;
+}
+
+/**
+ * Log in via Basic Auth and cache the session cookies.
+ * The cookies (hermes_session_at / hermes_session_rt) are required for
+ * all subsequent REST and ws-ticket requests.
+ */
+async function loginBasicAuth(
+  baseUrl: string,
+  username: string,
+  password: string,
+): Promise<string> {
+  const cacheKey = basicAuthCacheKey(baseUrl, username);
+  const cached = basicAuthCookieCache.get(cacheKey);
+  if (cached && cached.expiresAt > Date.now() + 5 * 60 * 1000) {
+    return cached.cookies;
+  }
+
+  const loginUrl = new URL("/auth/password-login", `${baseUrl}/`).toString();
+  const authHeader = `Basic ${Buffer.from(`${username}:${password}`).toString("base64")}`;
+
+  return new Promise<string>((resolve, reject) => {
+    const parsed = new URL(loginUrl);
+    const client = parsed.protocol === "https:" ? https : http;
+    const body = JSON.stringify({
+      provider: "basic",
+      username,
+      password,
+    });
+    const req = client.request(
+      parsed,
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: authHeader,
+        },
+      },
+      (res) => {
+        const chunks: Buffer[] = [];
+        res.on("error", reject);
+        res.on("data", (chunk: Buffer) => chunks.push(chunk));
+        res.on("end", () => {
+          const text = Buffer.concat(chunks).toString("utf8");
+          if ((res.statusCode ?? 500) >= 400) {
+            reject(
+              new Error(`Dashboard login failed (${res.statusCode}): ${text || res.statusMessage || "check username/password"}`),
+            );
+            return;
+          }
+          const setCookieHeaders = res.headers["set-cookie"];
+          if (!setCookieHeaders || setCookieHeaders.length === 0) {
+            reject(new Error("Dashboard login succeeded but no session cookies were returned"));
+            return;
+          }
+          // Parse "name=value" from each Set-Cookie header
+          const cookies = setCookieHeaders
+            .map((c) => c.split(";")[0])
+            .join("; ");
+          basicAuthCookieCache.set(cacheKey, {
+            cookies,
+            expiresAt: Date.now() + BASIC_AUTH_COOKIE_TTL,
+          });
+          resolve(cookies);
+        });
+      },
+    );
+    req.on("error", reject);
+    req.setTimeout(10_000, () => {
+      req.destroy(new Error("Timed out during dashboard login"));
+    });
+    req.write(body);
+    req.end();
+  });
+}
+
+/**
+ * Obtain a one-time WebSocket ticket for Basic Auth mode.
+ * The ticket is short-lived (default 30s TTL) so it must be fetched
+ * immediately before each WS connect / probe.
+ */
+async function fetchWsTicket(
+  baseUrl: string,
+  cookies: string,
+): Promise<string> {
+  const ticketUrl = new URL("/api/auth/ws-ticket", `${baseUrl}/`).toString();
+  return new Promise<string>((resolve, reject) => {
+    const parsed = new URL(ticketUrl);
+    const client = parsed.protocol === "https:" ? https : http;
+    const req = client.request(
+      parsed,
+      {
+        method: "POST",
+        headers: {
+          Cookie: cookies,
+        },
+      },
+      (res) => {
+        const chunks: Buffer[] = [];
+        res.on("error", reject);
+        res.on("data", (chunk: Buffer) => chunks.push(chunk));
+        res.on("end", () => {
+          const text = Buffer.concat(chunks).toString("utf8");
+          if ((res.statusCode ?? 500) >= 400) {
+            reject(
+              new Error(`Failed to get WS ticket (${res.statusCode}): ${text || res.statusMessage}`),
+            );
+            return;
+          }
+          try {
+            const data = JSON.parse(text) as { ticket?: string };
+            if (!data.ticket) {
+              reject(new Error("WS ticket response did not include a ticket"));
+              return;
+            }
+            resolve(data.ticket);
+          } catch {
+            reject(new Error(`Invalid JSON from ws-ticket: ${text.slice(0, 200)}`));
+          }
+        });
+      },
+    );
+    req.on("error", reject);
+    req.setTimeout(5_000, () => {
+      req.destroy(new Error("Timed out getting WS ticket"));
+    });
+    req.end();
+  });
+}
+
+/**
+ * Ensure a Basic Auth connection has valid cookies and a fresh
+ * wsUrl with a one-time ticket. Called right before the WS probe
+ * and before returning the connection to the renderer.
+ */
+async function ensureBasicAuthReady(
+  connection: DashboardConnection,
+  config: ConnectionConfig,
+): Promise<void> {
+  if (connection.authMode !== "basic-auth") return;
+  const cookies = await loginBasicAuth(
+    connection.baseUrl,
+    config.username!,
+    config.password!,
+  );
+  connection.cookies = cookies;
+  const ticket = await fetchWsTicket(connection.baseUrl, cookies);
+  // Build wsUrl with ?ticket= instead of ?token=
+  const url = new URL("/api/ws", connection.baseUrl);
+  url.protocol = url.protocol === "https:" ? "wss:" : "ws:";
+  url.searchParams.set("ticket", ticket);
+  connection.wsUrl = url.toString();
 }
 
 export function sshDashboardConnectionFromTunnel(
@@ -209,19 +409,22 @@ function requestJson(
   url: string,
   token: string,
   timeoutMs = 2_000,
+  cookies?: string,
 ): Promise<unknown> {
   return new Promise((resolve, reject) => {
     const parsed = new URL(url);
     const client = parsed.protocol === "https:" ? https : http;
+    const headers: Record<string, string> = {
+      "Content-Type": "application/json",
+    };
+    if (cookies) {
+      headers["Cookie"] = cookies;
+    } else {
+      headers["X-Hermes-Session-Token"] = token;
+    }
     const req = client.request(
       parsed,
-      {
-        method: "GET",
-        headers: {
-          "Content-Type": "application/json",
-          "X-Hermes-Session-Token": token,
-        },
-      },
+      { method: "GET", headers },
       (res) => {
         const chunks: Buffer[] = [];
         res.on("error", reject);
@@ -364,14 +567,21 @@ async function getRemoteDashboardStatusForConfig(
       supported: true,
       running: false,
       error:
-        "Remote dashboard transport needs a valid dashboard URL and session token.",
+        "Remote dashboard transport needs a valid dashboard URL and either an API key or Basic Auth (username/password).",
     };
   }
 
   try {
+    // ── Basic Auth: login first, get session cookies ──
+    if (connection.authMode === "basic-auth") {
+      await ensureBasicAuthReady(connection, config);
+    }
+
     const status = await requestJson(
       `${connection.baseUrl}/api/status`,
       connection.token,
+      2_000,
+      connection.cookies,
     );
     if (dashboardStatusRequiresOAuth(status)) {
       return {
@@ -388,15 +598,30 @@ async function getRemoteDashboardStatusForConfig(
     await requestJson(
       `${connection.baseUrl}/api/sessions?limit=1`,
       connection.token,
+      2_000,
+      connection.cookies,
     );
+
+    // ── Basic Auth: fetch a fresh ws-ticket right before the WS probe ──
+    // The ticket expires in ~30s so we must renew it immediately before
+    // handing the wsUrl to the renderer.
+    if (connection.authMode === "basic-auth") {
+      await ensureBasicAuthReady(connection, config);
+    }
     await probeDashboardWebSocket(connection);
 
-    return { supported: true, running: true, connection };
+    // Strip cookies before crossing the IPC boundary — the renderer only
+    // needs wsUrl (which carries the one-time ?ticket=) and token.
+    return {
+      supported: true,
+      running: true,
+      connection: { ...connection, cookies: undefined },
+    };
   } catch (err) {
     return {
       supported: true,
       running: false,
-      connection,
+      connection: { ...connection, cookies: undefined },
       error: err instanceof Error ? err.message : String(err),
     };
   }
