@@ -1186,7 +1186,23 @@ function setupIPC(): void {
 
   ipcMain.handle(
     "test-remote-connection",
-    (_event, url: string, apiKey?: string) => testRemoteConnection(url, apiKey),
+    (
+      _event,
+      url: string,
+      apiKey?: string,
+      username?: string,
+      password?: string,
+    ) => {
+      // When the renderer passes undefined (mask unchanged), fall back
+      // to the stored config so Test Connection works without re-typing.
+      const conn = getConnectionConfig();
+      return testRemoteConnection(
+        url,
+        apiKey,
+        username ?? (conn.username || undefined),
+        password ?? (conn.password || undefined),
+      );
+    },
   );
 
   ipcMain.handle(

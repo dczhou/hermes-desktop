@@ -550,9 +550,18 @@ function Settings({ profile }: { profile?: string }): React.JSX.Element {
       }
       setConnTesting(true);
       setConnStatus(null);
+      // Pass username/password for Basic Auth Dashboard connections.
+      // When the field shows the mask, the value is stored server-side —
+      // pass a sentinel so the main process reads it from saved config.
+      const userForTest =
+        connUsername && connUsername !== CRED_MASK ? connUsername.trim() : undefined;
+      const passForTest =
+        connPassword && connPassword !== CRED_MASK ? connPassword.trim() : undefined;
       const ok = await window.hermesAPI.testRemoteConnection(
         url,
         getConnectionApiKeyForSave(),
+        userForTest,
+        passForTest,
       );
       setConnTesting(false);
       setConnStatus(ok ? t("settings.remoteSuccess") : t("settings.remoteErrorFailedSimple"));

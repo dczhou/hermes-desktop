@@ -3122,6 +3122,71 @@ export function isGatewayHealthy(profile?: string): Promise<boolean> {
 export function testRemoteConnection(
   url: string,
   apiKey?: string,
+  username?: string,
+  password?: string,
+): Promise<boolean> {
+  // If Basic Auth credentials are provided, test via the Dashboard login
+  // flow (POST /auth/password-login) instead of the API server /health.
+  // Basic Auth Dashboards (port 9119) don't expose /health.
+  if (username && password) {
+    return testRemoteDashboardAuth(url, username, password);
+  }
+  return testRemoteApiHealth(url, apiKey);
+}
+
+/**
+ * Test a Basic Auth Dashboard by attempting to log in and then checking
+ * an authenticated REST endpoint.
+ */
+function testRemoteDashboardAuth(
+  url: string,
+  username: string,
+  password: string,
+): Promise<boolean> {
+  const base = normaliseRemoteUrl(url);
+  const auth64 = Buffer.from(`${username}:${password}`).toString("base64");
+  const loginTarget = `${base}/auth/password-login`;
+  const mod = loginTarget.startsWith("https") ? https : http;
+
+  return new Promise((resolve) => {
+    const body = JSON.stringify({
+      provider: "basic",
+      username,
+      password,
+    });
+    const req = mod.request(
+      loginTarget,
+      {
+        method: "POST",
+        timeout: 8000,
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Basic ${auth64}`,
+        },
+      },
+      (res) => {
+        const setCookies = res.headers["set-cookie"];
+        const gotSession =
+          (res.statusCode ?? 0) < 400 &&
+          !!setCookies &&
+          setCookies.length > 0;
+        res.resume();
+        resolve(gotSession);
+      },
+    );
+    req.on("error", () => resolve(false));
+    req.on("timeout", () => {
+      req.destroy();
+      resolve(false);
+    });
+    req.write(body);
+    req.end();
+  });
+}
+
+function testRemoteApiHealth(
+  url: string,
+  apiKey?: string,
 ): Promise<boolean> {
   return new Promise((resolve) => {
     const target = `${normaliseRemoteUrl(url)}/health`;
