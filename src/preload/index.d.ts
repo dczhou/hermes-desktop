@@ -302,9 +302,9 @@ interface HermesAPI {
     remoteChatTransport: "auto" | "dashboard" | "legacy";
     sshChatTransport: "auto" | "dashboard" | "legacy";
     hasApiKey: boolean;
+    hasUsername: boolean;
+    hasPassword: boolean;
     apiKeyLength: number;
-    username?: string;
-    password?: string;
     ssh: {
       host: string;
       port: number;

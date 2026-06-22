@@ -19,6 +19,11 @@ import {
 import { ConfigHealth } from "./ConfigHealth";
 
 const DISCORD_COMMUNITY_URL = "https://discord.gg/vMwcnNPHc";
+
+// Mask shown in username/password fields when a value is stored but the
+// plaintext is not sent from the main process. If the user doesn't edit
+// the field, we pass undefined on save so the stored value is preserved.
+const CRED_MASK = "********";
 type RemoteChatTransport = "auto" | "dashboard" | "legacy";
 const CHAT_TRANSPORT_OPTIONS: RemoteChatTransport[] = [
   "auto",
@@ -235,8 +240,11 @@ function Settings({ profile }: { profile?: string }): React.JSX.Element {
     setConnMode(conn.mode);
     setConnRemoteUrl(conn.remoteUrl);
     setConnHasApiKey(conn.hasApiKey);
-    setConnUsername(conn.username || "");
-    setConnPassword(conn.password || "");
+    // PublicConnectionConfig doesn't expose plaintext username/password,
+    // only hasUsername/hasPassword. Show a mask when a value is stored so
+    // the user knows credentials are saved without exposing the secret.
+    setConnUsername(conn.hasUsername ? CRED_MASK : "");
+    setConnPassword(conn.hasPassword ? CRED_MASK : "");
     setRemoteChatTransport(conn.remoteChatTransport ?? "auto");
     setSshChatTransport(conn.sshChatTransport ?? "auto");
     const mask = conn.hasApiKey ? makeApiKeyMask(conn.apiKeyLength) : "";
@@ -464,12 +472,18 @@ function Settings({ profile }: { profile?: string }): React.JSX.Element {
       await saveSshConnectionMode();
     } else {
       const apiKey = getConnectionApiKeyForSave();
+      // If username/password still show the mask, the user didn't edit
+      // them — pass undefined so the main process preserves stored values.
+      const usernameForSave =
+        connUsername === CRED_MASK ? undefined : connUsername.trim();
+      const passwordForSave =
+        connPassword === CRED_MASK ? undefined : connPassword.trim();
       await window.hermesAPI.setConnectionConfig(
         connMode,
         connRemoteUrl,
         apiKey,
-        connUsername,
-        connPassword,
+        usernameForSave,
+        passwordForSave,
       );
       if (apiKey !== undefined) {
         const hasApiKey = apiKey.length > 0;
@@ -987,6 +1001,11 @@ function Settings({ profile }: { profile?: string }): React.JSX.Element {
                 type="text"
                 value={connUsername}
                 onChange={(e) => setConnUsername(e.target.value)}
+                onFocus={(e) => {
+                  if (connUsername === CRED_MASK) {
+                    e.currentTarget.select();
+                  }
+                }}
                 placeholder={t("settings.remoteUsernamePlaceholder")}
               />
               <div className="settings-field-hint">
@@ -1003,8 +1022,7 @@ function Settings({ profile }: { profile?: string }): React.JSX.Element {
                 value={connPassword}
                 onChange={(e) => setConnPassword(e.target.value)}
                 onFocus={(e) => {
-                  if (connPassword === "") {
-                    // Only select if it's empty (not masked)
+                  if (connPassword === CRED_MASK) {
                     e.currentTarget.select();
                   }
                 }}
