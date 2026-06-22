@@ -353,7 +353,12 @@ interface HermesAPI {
     remotePort: number,
     localPort: number,
   ) => Promise<boolean>;
-  testRemoteConnection: (url: string, apiKey?: string) => Promise<boolean>;
+  testRemoteConnection: (
+    url: string,
+    apiKey?: string,
+    username?: string,
+    password?: string,
+  ) => Promise<boolean>;
   testSshConnection: (
     host: string,
     port: number,
