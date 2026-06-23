@@ -34,6 +34,8 @@ function Welcome({
   // Remote state
   const [remoteUrl, setRemoteUrl] = useState("");
   const [remoteApiKey, setRemoteApiKey] = useState("");
+  const [remoteUsername, setRemoteUsername] = useState("");
+  const [remotePassword, setRemotePassword] = useState("");
   const [remoteError, setRemoteError] = useState<string | null>(null);
   const [remoteTesting, setRemoteTesting] = useState(false);
 
@@ -49,6 +51,8 @@ function Welcome({
   async function handleConnectRemote(): Promise<void> {
     const url = remoteUrl.trim();
     const key = remoteApiKey.trim();
+    const user = remoteUsername.trim();
+    const pass = remotePassword.trim();
     if (!url) {
       setRemoteError(t("settings.remoteErrorUrl"));
       return;
@@ -56,9 +60,20 @@ function Welcome({
     setRemoteTesting(true);
     setRemoteError(null);
     try {
-      const ok = await window.hermesAPI.testRemoteConnection(url, key);
+      const ok = await window.hermesAPI.testRemoteConnection(
+        url,
+        key || undefined,
+        user || undefined,
+        pass || undefined,
+      );
       if (ok) {
-        await window.hermesAPI.setConnectionConfig("remote", url, key);
+        await window.hermesAPI.setConnectionConfig(
+          "remote",
+          url,
+          key || undefined,
+          user || undefined,
+          pass || undefined,
+        );
         onRecheck();
       } else {
         setRemoteError(t("settings.remoteErrorConnection"));
@@ -127,7 +142,7 @@ function Welcome({
           <input
             type="url"
             className="welcome-remote-input"
-            placeholder="http://192.168.1.100:8642"
+            placeholder="http://192.168.1.100:9119"
             value={remoteUrl}
             onChange={(e) => setRemoteUrl(e.target.value)}
             onKeyDown={(e) => {
@@ -138,6 +153,9 @@ function Welcome({
 
           <label className="welcome-remote-label" style={{ marginTop: 12 }}>
             {t("welcome.remoteApiKey")}
+            <span style={{ fontWeight: 400, opacity: 0.6, marginLeft: 8 }}>
+              {t("settings.remoteApiKeyHint")}
+            </span>
           </label>
           <input
             type="password"
@@ -145,6 +163,40 @@ function Welcome({
             placeholder={t("welcome.remoteApiKeyPlaceholder")}
             value={remoteApiKey}
             onChange={(e) => setRemoteApiKey(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") handleConnectRemote();
+            }}
+          />
+
+          <label className="welcome-remote-label" style={{ marginTop: 12 }}>
+            {t("settings.remoteUsername")}
+            <span style={{ fontWeight: 400, opacity: 0.6, marginLeft: 8 }}>
+              ({t("settings.remoteUsernameHint")})
+            </span>
+          </label>
+          <input
+            type="text"
+            className="welcome-remote-input"
+            placeholder={t("settings.remoteUsernamePlaceholder")}
+            value={remoteUsername}
+            onChange={(e) => setRemoteUsername(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") handleConnectRemote();
+            }}
+          />
+
+          <label className="welcome-remote-label" style={{ marginTop: 12 }}>
+            {t("settings.remotePassword")}
+            <span style={{ fontWeight: 400, opacity: 0.6, marginLeft: 8 }}>
+              ({t("settings.remotePasswordHint")})
+            </span>
+          </label>
+          <input
+            type="password"
+            className="welcome-remote-input"
+            placeholder={t("settings.remotePasswordPlaceholder")}
+            value={remotePassword}
+            onChange={(e) => setRemotePassword(e.target.value)}
             onKeyDown={(e) => {
               if (e.key === "Enter") handleConnectRemote();
             }}
