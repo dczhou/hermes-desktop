@@ -256,8 +256,17 @@ const hermesAPI = {
     mode: "local" | "remote" | "ssh",
     remoteUrl: string,
     apiKey?: string,
+    username?: string,
+    password?: string,
   ): Promise<boolean> =>
-    ipcRenderer.invoke("set-connection-config", mode, remoteUrl, apiKey),
+    ipcRenderer.invoke(
+      "set-connection-config",
+      mode,
+      remoteUrl,
+      apiKey,
+      username,
+      password,
+    ),
 
   setConnectionChatTransports: (
     remoteChatTransport: "auto" | "dashboard" | "legacy",

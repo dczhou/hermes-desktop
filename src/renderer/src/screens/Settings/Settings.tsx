@@ -975,7 +975,7 @@ function Settings({ profile }: { profile?: string }): React.JSX.Element {
                 type="url"
                 value={connRemoteUrl}
                 onChange={(e) => setConnRemoteUrl(e.target.value)}
-                placeholder="http://192.168.1.100:8642"
+                placeholder="http://192.168.1.100:9119"
               />
               <div className="settings-field-hint">
                 {t("settings.remoteUrlHint")}
